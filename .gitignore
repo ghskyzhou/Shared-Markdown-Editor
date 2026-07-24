@@ -1,0 +1,44 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+.session_secret
+
+# Runtime data
+documents.db
+documents.db-shm
+documents.db-wal
+data.txt
+data.txt.tmp
+*.sqlite
+*.sqlite3
+instance/
+
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python caches and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+build/
+dist/
+*.egg-info/
+
+# Logs and local process files
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini

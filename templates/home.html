@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>共享 Markdown 编辑器</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #202124;
+      --muted: #6b7280;
+      --border: #e2e5e9;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      min-height: 100%;
+      margin: 0;
+    }
+
+    body {
+      color: var(--ink);
+      background: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+                   "Microsoft YaHei", sans-serif;
+    }
+
+    .page {
+      width: min(1180px, calc(100% - 48px));
+      margin: 0 auto;
+      padding: 42px 0 72px;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 38px;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.25;
+      letter-spacing: -0.02em;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      margin-left: auto;
+      gap: 10px;
+    }
+
+    form { margin: 0; }
+
+    button {
+      border-radius: 7px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .new-button {
+      padding: 8px 13px;
+      color: #fff;
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .new-button:hover { background: var(--accent-hover); }
+
+    .logout-button {
+      padding: 8px 10px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      font-size: 13px;
+    }
+
+    .logout-button:hover {
+      color: var(--ink);
+      background: #f4f5f6;
+    }
+
+    .column-header,
+    .document-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(145px, 220px);
+      align-items: center;
+      column-gap: 32px;
+    }
+
+    .column-header {
+      min-height: 42px;
+      padding: 0 20px;
+      color: #4b5563;
+      font-size: 13px;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .document-group {
+      margin-top: 26px;
+    }
+
+    .document-group h2 {
+      margin: 0;
+      padding: 0 20px 12px;
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    .document-list {
+      border-top: 1px solid var(--border);
+    }
+
+    .document-row {
+      min-height: 70px;
+      padding: 0 20px;
+      color: inherit;
+      text-decoration: none;
+      border-bottom: 1px solid var(--border);
+      transition: background-color 120ms ease;
+    }
+
+    .document-row:hover {
+      background: #f8fafc;
+    }
+
+    .document-title {
+      min-width: 0;
+      overflow: hidden;
+      font-size: 16px;
+      font-weight: 560;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .document-time {
+      color: #374151;
+      font-size: 14px;
+    }
+
+    .empty-state {
+      margin-top: 56px;
+      padding: 54px 24px;
+      color: var(--muted);
+      text-align: center;
+      background: #fafafa;
+      border: 1px dashed #d6d9de;
+      border-radius: 12px;
+    }
+
+    .empty-state strong {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--ink);
+      font-size: 17px;
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        width: min(100% - 28px, 1180px);
+        padding-top: 26px;
+      }
+
+      .page-header {
+        align-items: flex-start;
+        margin-bottom: 26px;
+      }
+
+      h1 { font-size: 23px; }
+
+      .header-actions {
+        align-items: flex-end;
+        flex-direction: column;
+      }
+
+      .column-header,
+      .document-row {
+        grid-template-columns: minmax(0, 1fr) 92px;
+        column-gap: 14px;
+        padding-right: 10px;
+        padding-left: 10px;
+      }
+
+      .document-group h2 { padding-left: 10px; }
+      .document-row { min-height: 64px; }
+      .document-time { text-align: right; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="page-header">
+      <h1>共享 Markdown 编辑器</h1>
+      <div class="header-actions">
+        <form method="post" action="{{ url_for('new_document') }}">
+          <button class="new-button" type="submit">新建 Markdown</button>
+        </form>
+        <form method="post" action="{{ url_for('logout') }}">
+          <button class="logout-button" type="submit">退出登录</button>
+        </form>
+      </div>
+    </header>
+
+    {% set total_documents = grouped_documents['今天']|length + grouped_documents['更早']|length %}
+    {% if total_documents %}
+      <div class="column-header" aria-hidden="true">
+        <span>标题</span>
+        <span>上次编辑时间</span>
+      </div>
+
+      {% for group_name in ['今天', '更早'] %}
+        {% if grouped_documents[group_name] %}
+          <section class="document-group" aria-labelledby="group-{{ loop.index }}">
+            <h2 id="group-{{ loop.index }}">{{ group_name }}</h2>
+            <div class="document-list">
+              {% for document in grouped_documents[group_name] %}
+                <a class="document-row"
+                   href="{{ url_for('edit_document', document_id=document.id) }}">
+                  <span class="document-title">{{ document.title }}</span>
+                  <time class="document-time">{{ document.display_time }}</time>
+                </a>
+              {% endfor %}
+            </div>
+          </section>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">
+        <strong>还没有 Markdown 文档</strong>
+        点击右上角的“新建 Markdown”开始编辑。
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>

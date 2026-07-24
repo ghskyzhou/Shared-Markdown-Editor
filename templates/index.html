@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>共享 Markdown 编辑器</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      chtml: { scale: 0.96 }
+    };
+  </script>
+  <script id="MathJax-script" async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+
+  <style>
+    :root {
+      color-scheme: light;
+      --border: #e5e7eb;
+      --muted: #6b7280;
+      --surface: #ffffff;
+      --soft: #f7f7f8;
+      --active-line: rgba(17, 24, 39, 0.055);
+      --line-height: 24px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      color: #202124;
+      background: #fafafa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+                   "Microsoft YaHei", sans-serif;
+    }
+
+    .document-header {
+      display: flex;
+      align-items: center;
+      min-height: 50px;
+      padding: 7px 14px;
+      gap: 12px;
+      background: #fff;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .home-link {
+      color: var(--muted);
+      font-size: 13px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .home-link:hover { color: #202124; }
+
+    #documentTitle {
+      width: min(460px, 58vw);
+      padding: 6px 8px;
+      overflow: hidden;
+      color: #27272a;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      outline: none;
+      font: 600 15px/1.4 inherit;
+      text-overflow: ellipsis;
+    }
+
+    #documentTitle:hover { border-color: #e4e4e7; }
+    #documentTitle:focus {
+      border-color: #a1a1aa;
+      background: #fff;
+    }
+
+    .workspace {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .editor-pane,
+    #preview {
+      width: 50%;
+      height: 100%;
+      background: var(--surface);
+    }
+
+    .editor-pane {
+      display: flex;
+      position: relative;
+      min-width: 0;
+      border-right: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .gutter {
+      position: relative;
+      flex: 0 0 58px;
+      height: 100%;
+      overflow: hidden;
+      color: #a1a1aa;
+      background: #fafafa;
+      border-right: 1px solid #eeeeef;
+      font: 13px/var(--line-height) "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      text-align: right;
+      user-select: none;
+    }
+
+    #lineNumbers {
+      position: absolute;
+      top: 16px;
+      right: 12px;
+      left: 0;
+      will-change: transform;
+    }
+
+    .line-number { min-height: var(--line-height); }
+
+    .line-number span {
+      display: block;
+      height: var(--line-height);
+    }
+
+    .line-number.active {
+      color: #4b5563;
+      font-weight: 600;
+    }
+
+    .editor-stage {
+      position: relative;
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #currentLine {
+      position: absolute;
+      z-index: 0;
+      top: 0;
+      right: 0;
+      left: 0;
+      height: var(--line-height);
+      background: var(--active-line);
+      pointer-events: none;
+      will-change: transform;
+    }
+
+    #editor {
+      position: absolute;
+      z-index: 1;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 16px 18px 40px;
+      overflow: auto;
+      border: 0;
+      outline: 0;
+      resize: none;
+      color: #24292f;
+      background: transparent;
+      caret-color: #111827;
+      font: 15px/var(--line-height) "SFMono-Regular", Consolas,
+            "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans Mono CJK SC",
+            "Noto Sans SC", monospace;
+      tab-size: 2;
+      white-space: pre-wrap;
+      overflow-x: hidden;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+
+    #editor:disabled {
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+
+    #lineMeasure {
+      position: absolute;
+      top: -100000px;
+      left: 0;
+      z-index: -1;
+      visibility: hidden;
+      font: 15px/var(--line-height) "SFMono-Regular", Consolas,
+            "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans Mono CJK SC",
+            "Noto Sans SC", monospace;
+      tab-size: 2;
+      pointer-events: none;
+    }
+
+    .measure-line {
+      min-height: var(--line-height);
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+
+    #preview {
+      min-width: 0;
+      padding: 24px 32px 56px;
+      overflow: auto;
+      line-height: 1.72;
+      scroll-behavior: auto;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    #preview .source-block {
+      display: flow-root;
+      min-height: 1px;
+    }
+
+    #preview .empty-preview {
+      margin-top: 4px;
+      color: #9ca3af;
+    }
+
+    #preview h1,
+    #preview h2,
+    #preview h3 {
+      margin: 1.25em 0 0.45em;
+      line-height: 1.28;
+    }
+
+    #preview h1:first-child,
+    #preview h2:first-child,
+    #preview h3:first-child,
+    #preview .source-block:first-child > :first-child {
+      margin-top: 0;
+    }
+
+    #preview p { margin: 0.65em 0; }
+
+    #preview img {
+      max-width: 100%;
+      height: auto;
+    }
+
+    #preview pre {
+      padding: 14px 16px;
+      overflow-x: hidden;
+      background: #f6f8fa;
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.04);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    #preview code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    #preview :not(pre) > code {
+      white-space: break-spaces;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    #preview blockquote {
+      margin-left: 0;
+      padding-left: 1em;
+      color: #57606a;
+      border-left: 4px solid #d0d7de;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      min-height: 52px;
+      padding: 8px 14px;
+      gap: 10px;
+      background: #fff;
+      border-top: 1px solid var(--border);
+    }
+
+    .connection-status {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      margin-right: auto;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #f59e0b;
+    }
+
+    .connection-status.connected .status-dot { background: #22c55e; }
+    .connection-status.error .status-dot { background: #ef4444; }
+
+    button {
+      padding: 7px 13px;
+      color: #27272a;
+      background: var(--soft);
+      border: 1px solid #d8dadd;
+      border-radius: 7px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button:hover { background: #efeff0; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.55; cursor: wait; }
+
+    .exit-link {
+      padding: 7px 13px;
+      color: #27272a;
+      background: var(--soft);
+      border: 1px solid #d8dadd;
+      border-radius: 7px;
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    .exit-link:hover { background: #efeff0; }
+
+    @media (max-width: 760px) {
+      .workspace { flex-direction: column; }
+      .editor-pane,
+      #preview {
+        width: 100%;
+        height: 50%;
+      }
+      .editor-pane {
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      #preview { padding: 20px 22px 44px; }
+      .gutter { flex-basis: 48px; }
+      .connection-status span:last-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="document-header">
+    <a class="home-link" href="{{ url_for('index') }}">Markdown 文档</a>
+    <input id="documentTitle" type="text" maxlength="160"
+           value="{{ document_title }}" aria-label="文档标题">
+  </header>
+
+  <main class="workspace">
+    <section class="editor-pane" aria-label="Markdown 编辑区">
+      <div class="gutter" aria-hidden="true">
+        <div id="lineNumbers"></div>
+      </div>
+      <div class="editor-stage">
+        <div id="currentLine" aria-hidden="true"></div>
+        <textarea id="editor" wrap="soft" spellcheck="false"
+                  aria-label="Markdown 文本"
+                  placeholder="输入 Markdown 内容…"></textarea>
+        <div id="lineMeasure" aria-hidden="true"></div>
+      </div>
+    </section>
+    <article id="preview" aria-label="Markdown 预览" aria-live="polite"></article>
+  </main>
+
+  <footer class="toolbar">
+    <div id="connectionStatus" class="connection-status">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="statusText">正在连接实时协作…</span>
+    </div>
+    <button id="toggleEdit" type="button">关闭编辑</button>
+    <button id="saveBtn" type="button">保存</button>
+    <a class="exit-link" href="{{ url_for('index') }}">退出</a>
+  </footer>
+
+  <script>
+    const documentId = {{ document_id | tojson }};
+    const initialTitle = {{ document_title | tojson }};
+    const initialContent = {{ content | tojson }};
+    const initialVersion = {{ version | tojson }};
+
+    const editor = document.getElementById('editor');
+    const preview = document.getElementById('preview');
+    const lineNumbers = document.getElementById('lineNumbers');
+    const lineMeasure = document.getElementById('lineMeasure');
+    const currentLine = document.getElementById('currentLine');
+    const documentTitle = document.getElementById('documentTitle');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const statusText = document.getElementById('statusText');
+    const saveBtn = document.getElementById('saveBtn');
+    const toggleEdit = document.getElementById('toggleEdit');
+
+    let serverContent = initialContent;
+    let serverVersion = initialVersion;
+    let inflight = null;
+    let sendTimer = null;
+    let renderTimer = null;
+    let saveRequested = false;
+    let initializedFromSocket = false;
+    let activeLineIndex = -1;
+    let scrollLock = null;
+    let scrollLockTimer = null;
+    let lineLayoutFrame = null;
+    let titleSaveTimer = null;
+    let lineLayouts = [];
+
+    editor.value = initialContent;
+
+    function setStatus(kind, message) {
+      connectionStatus.classList.toggle('connected', kind === 'connected');
+      connectionStatus.classList.toggle('error', kind === 'error');
+      statusText.textContent = message;
+    }
+
+    function normalizeLang(language) {
+      if (!language) return null;
+      const aliases = {
+        'c++': 'cpp',
+        'js': 'javascript',
+        'ts': 'typescript',
+        'py': 'python',
+        'sh': 'bash',
+        'shell': 'bash'
+      };
+      const normalized = String(language)
+        .trim()
+        .toLowerCase()
+        .replace(/^language-/, '')
+        .replace(/^lang-/, '');
+      return aliases[normalized] || normalized;
+    }
+
+    function newlineCount(value) {
+      const matches = value.match(/\n/g);
+      return matches ? matches.length : 0;
+    }
+
+    function renderMarkdown() {
+      renderTimer = null;
+      const source = editor.value || '';
+
+      if (window.MathJax && typeof MathJax.typesetClear === 'function') {
+        MathJax.typesetClear([preview]);
+      }
+
+      if (!source) {
+        preview.innerHTML = '<p class="empty-preview">预览会显示在这里。</p>';
+        return;
+      }
+
+      const tokens = marked.lexer(source);
+      let cursor = 0;
+      let sourceLine = 0;
+      const fragments = [];
+
+      for (const token of tokens) {
+        const raw = typeof token.raw === 'string' ? token.raw : '';
+        let tokenIndex = raw ? source.indexOf(raw, cursor) : cursor;
+        if (tokenIndex < 0) tokenIndex = cursor;
+
+        sourceLine += newlineCount(source.slice(cursor, tokenIndex));
+        const startLine = sourceLine;
+        const endLine = startLine + newlineCount(raw);
+        const tokenBatch = [token];
+        tokenBatch.links = tokens.links;
+        const rendered = marked.parser(tokenBatch);
+
+        if (rendered.trim()) {
+          fragments.push(
+            `<div class="source-block" data-source-start="${startLine}" ` +
+            `data-source-end="${Math.max(startLine, endLine)}">${rendered}</div>`
+          );
+        }
+
+        cursor = Math.max(cursor, tokenIndex + raw.length);
+        sourceLine = endLine;
+      }
+
+      preview.innerHTML = fragments.join('');
+
+      preview.querySelectorAll('pre code').forEach((block) => {
+        const match = (block.className || '').match(/(?:language|lang)-([^\s]+)/i);
+        const language = normalizeLang(match ? match[1] : null);
+        try {
+          if (language && hljs.getLanguage(language)) {
+            block.classList.add(`language-${language}`);
+          }
+          hljs.highlightElement(block);
+        } catch (error) {
+          console.warn('代码高亮失败：', error);
+        }
+      });
+
+      if (window.MathJax && typeof MathJax.typesetPromise === 'function') {
+        MathJax.typesetPromise([preview])
+          .then(() => {
+            if (scrollLock !== 'preview') syncPreviewFromEditor();
+          })
+          .catch((error) => console.warn('公式渲染失败：', error));
+      }
+    }
+
+    function scheduleRender() {
+      window.clearTimeout(renderTimer);
+      renderTimer = window.setTimeout(renderMarkdown, 60);
+    }
+
+    function updateLineLayout() {
+      lineLayoutFrame = null;
+      const style = getComputedStyle(editor);
+      const lineHeight = parseFloat(style.lineHeight) || 24;
+      const paddingLeft = parseFloat(style.paddingLeft) || 0;
+      const paddingRight = parseFloat(style.paddingRight) || 0;
+      const contentWidth = Math.max(
+        1,
+        editor.clientWidth - paddingLeft - paddingRight
+      );
+      const logicalLines = editor.value.split('\n');
+
+      lineMeasure.style.width = `${contentWidth}px`;
+      const measureFragment = document.createDocumentFragment();
+      logicalLines.forEach((line) => {
+        const measurement = document.createElement('div');
+        measurement.className = 'measure-line';
+        measurement.textContent = line || '\u200b';
+        measureFragment.appendChild(measurement);
+      });
+      lineMeasure.replaceChildren(measureFragment);
+
+      let top = 0;
+      lineLayouts = Array.from(lineMeasure.children, (measurement) => {
+        const measuredHeight = measurement.getBoundingClientRect().height;
+        const visualRows = Math.max(1, Math.round(measuredHeight / lineHeight));
+        const layout = { top, height: visualRows * lineHeight };
+        top += layout.height;
+        return layout;
+      });
+
+      const numberFragment = document.createDocumentFragment();
+      lineLayouts.forEach((layout, index) => {
+        const number = document.createElement('div');
+        number.className = 'line-number';
+        number.style.height = `${layout.height}px`;
+        const label = document.createElement('span');
+        label.textContent = String(index + 1);
+        number.appendChild(label);
+        numberFragment.appendChild(number);
+      });
+      lineNumbers.replaceChildren(numberFragment);
+      activeLineIndex = -1;
+      updateActiveLine();
+      syncGutter();
+    }
+
+    function scheduleLineLayout() {
+      if (lineLayoutFrame !== null) {
+        cancelAnimationFrame(lineLayoutFrame);
+      }
+      lineLayoutFrame = requestAnimationFrame(updateLineLayout);
+    }
+
+    function currentEditorLine() {
+      return newlineCount(editor.value.slice(0, editor.selectionStart));
+    }
+
+    function updateActiveLine() {
+      const paddingTop = parseFloat(getComputedStyle(editor).paddingTop) || 16;
+      const line = currentEditorLine();
+      const layout = lineLayouts[line] || {
+        top: line * 24,
+        height: 24
+      };
+      currentLine.style.height = `${layout.height}px`;
+      currentLine.style.transform =
+        `translateY(${paddingTop + layout.top - editor.scrollTop}px)`;
+
+      if (line !== activeLineIndex) {
+        lineNumbers.children[activeLineIndex]?.classList.remove('active');
+        lineNumbers.children[line]?.classList.add('active');
+        activeLineIndex = line;
+      }
+    }
+
+    function syncGutter() {
+      lineNumbers.style.transform = `translateY(${-editor.scrollTop}px)`;
+      updateActiveLine();
+    }
+
+    function sourcePositionForEditorScroll(scrollTop) {
+      if (!lineLayouts.length) return 0;
+      const y = Math.max(0, scrollTop);
+      for (let index = 0; index < lineLayouts.length; index += 1) {
+        const layout = lineLayouts[index];
+        if (y <= layout.top + layout.height || index === lineLayouts.length - 1) {
+          const ratio = Math.min(
+            0.999,
+            Math.max(0, (y - layout.top) / Math.max(1, layout.height))
+          );
+          return index + ratio;
+        }
+      }
+      return lineLayouts.length - 1;
+    }
+
+    function editorYForSourcePosition(sourceLine) {
+      if (!lineLayouts.length) return 0;
+      const index = Math.max(
+        0,
+        Math.min(lineLayouts.length - 1, Math.floor(sourceLine))
+      );
+      const fraction = Math.max(0, Math.min(1, sourceLine - index));
+      const current = lineLayouts[index];
+      const nextTop = lineLayouts[index + 1]?.top ?? (current.top + current.height);
+      return current.top + fraction * (nextTop - current.top);
+    }
+
+    function sourceBlocks() {
+      return Array.from(preview.querySelectorAll('.source-block'));
+    }
+
+    function previewYForLine(line) {
+      const blocks = sourceBlocks();
+      if (!blocks.length) return 0;
+
+      for (let index = 0; index < blocks.length; index += 1) {
+        const block = blocks[index];
+        const start = Number(block.dataset.sourceStart);
+        const end = Math.max(start, Number(block.dataset.sourceEnd));
+        const next = blocks[index + 1];
+
+        if (line <= start) return block.offsetTop;
+        if (line <= end || !next) {
+          const span = Math.max(1, end - start + 1);
+          const ratio = Math.min(1, Math.max(0, (line - start) / span));
+          return block.offsetTop + ratio * block.offsetHeight;
+        }
+
+        const nextStart = Number(next.dataset.sourceStart);
+        if (line < nextStart) {
+          const ratio = (line - end) / Math.max(1, nextStart - end);
+          return block.offsetTop + block.offsetHeight +
+            ratio * Math.max(0, next.offsetTop - block.offsetTop - block.offsetHeight);
+        }
+      }
+      return preview.scrollHeight;
+    }
+
+    function sourceLineForPreviewY(y) {
+      const blocks = sourceBlocks();
+      if (!blocks.length) return 0;
+
+      for (let index = 0; index < blocks.length; index += 1) {
+        const block = blocks[index];
+        const top = block.offsetTop;
+        const bottom = top + block.offsetHeight;
+        const start = Number(block.dataset.sourceStart);
+        const end = Math.max(start, Number(block.dataset.sourceEnd));
+        const next = blocks[index + 1];
+
+        if (y <= top) return start;
+        if (y <= bottom || !next) {
+          const ratio = Math.min(1, Math.max(0, (y - top) / Math.max(1, block.offsetHeight)));
+          return start + ratio * Math.max(1, end - start + 1);
+        }
+
+        if (y < next.offsetTop) {
+          const nextStart = Number(next.dataset.sourceStart);
+          const ratio = (y - bottom) / Math.max(1, next.offsetTop - bottom);
+          return end + ratio * Math.max(1, nextStart - end);
+        }
+      }
+      return newlineCount(editor.value);
+    }
+
+    function lockScroll(side) {
+      scrollLock = side;
+      window.clearTimeout(scrollLockTimer);
+      scrollLockTimer = window.setTimeout(() => {
+        scrollLock = null;
+      }, 40);
+    }
+
+    function syncPreviewFromEditor() {
+      if (scrollLock === 'preview') return;
+      const topLine = sourcePositionForEditorScroll(editor.scrollTop);
+      const target = previewYForLine(topLine);
+      lockScroll('editor');
+      preview.scrollTop = Math.max(
+        0,
+        Math.min(target, preview.scrollHeight - preview.clientHeight)
+      );
+    }
+
+    function syncEditorFromPreview() {
+      if (scrollLock === 'editor') return;
+      const sourceLine = sourceLineForPreviewY(preview.scrollTop);
+      lockScroll('preview');
+      editor.scrollTop = Math.max(
+        0,
+        Math.min(
+          editorYForSourcePosition(sourceLine),
+          editor.scrollHeight - editor.clientHeight
+        )
+      );
+      syncGutter();
+    }
+
+    function calculateSplice(before, after) {
+      if (before === after) return null;
+      let start = 0;
+      const shared = Math.min(before.length, after.length);
+      while (start < shared && before[start] === after[start]) start += 1;
+
+      let beforeEnd = before.length;
+      let afterEnd = after.length;
+      while (
+        beforeEnd > start &&
+        afterEnd > start &&
+        before[beforeEnd - 1] === after[afterEnd - 1]
+      ) {
+        beforeEnd -= 1;
+        afterEnd -= 1;
+      }
+
+      return {
+        start,
+        deleteCount: beforeEnd - start,
+        insert: after.slice(start, afterEnd)
+      };
+    }
+
+    function transformPosition(position, applied, moveAfterEqualInsert) {
+      const appliedEnd = applied.start + applied.deleteCount;
+      const insertedLength = applied.insert.length;
+      if (position < applied.start) return position;
+      if (position > appliedEnd) {
+        return position + insertedLength - applied.deleteCount;
+      }
+      if (applied.start === appliedEnd) {
+        return position === applied.start && moveAfterEqualInsert
+          ? applied.start + insertedLength
+          : position;
+      }
+      if (position === appliedEnd) return applied.start + insertedLength;
+      if (position === applied.start) return applied.start;
+      return applied.start + (moveAfterEqualInsert ? insertedLength : 0);
+    }
+
+    function mergeLocalChanges(base, local, remote) {
+      const localEdit = calculateSplice(base, local);
+      if (!localEdit) return remote;
+      const remoteEdit = calculateSplice(base, remote);
+      if (!remoteEdit) return local;
+
+      let start = transformPosition(localEdit.start, remoteEdit, true);
+      let end = localEdit.start + localEdit.deleteCount;
+      end = transformPosition(end, remoteEdit, false);
+      end = Math.max(start, end);
+      return remote.slice(0, start) + localEdit.insert + remote.slice(end);
+    }
+
+    function replaceEditorValue(value) {
+      const oldValue = editor.value;
+      const oldStart = editor.selectionStart;
+      const oldEnd = editor.selectionEnd;
+      const change = calculateSplice(oldValue, value);
+      editor.value = value;
+
+      if (change) {
+        const delta = change.insert.length - change.deleteCount;
+        const mapCaret = (position) => {
+          if (position <= change.start) return position;
+          if (position >= change.start + change.deleteCount) return position + delta;
+          return change.start + change.insert.length;
+        };
+        const max = value.length;
+        editor.setSelectionRange(
+          Math.min(max, mapCaret(oldStart)),
+          Math.min(max, mapCaret(oldEnd))
+        );
+      }
+
+      scheduleLineLayout();
+      updateActiveLine();
+      scheduleRender();
+    }
+
+    function scheduleSend() {
+      window.clearTimeout(sendTimer);
+      sendTimer = window.setTimeout(sendPendingChanges, 110);
+    }
+
+    function sendPendingChanges() {
+      sendTimer = null;
+      if (!socket.connected || inflight || editor.value === serverContent) {
+        maybeSave();
+        return;
+      }
+      inflight = {
+        content: editor.value,
+        baseContent: serverContent,
+        baseVersion: serverVersion
+      };
+      setStatus('connected', '正在同步…');
+      socket.emit('document:update', {
+        document_id: documentId,
+        content: inflight.content,
+        base_version: inflight.baseVersion
+      });
+    }
+
+    function maybeSave() {
+      if (!saveRequested || inflight || editor.value !== serverContent) return;
+      saveRequested = false;
+      socket.emit('document:save', { document_id: documentId });
+    }
+
+    function saveTitle() {
+      window.clearTimeout(titleSaveTimer);
+      const requestedTitle = documentTitle.value;
+      fetch(`/documents/${documentId}/title`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: requestedTitle })
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error('标题保存失败');
+          return response.json();
+        })
+        .then((result) => {
+          documentTitle.value = result.title;
+          document.title = `${result.title} · Markdown 编辑器`;
+        })
+        .catch(() => setStatus('error', '标题暂时无法保存'));
+    }
+
+    const socket = io({
+      transports: ['websocket', 'polling'],
+      reconnection: true
+    });
+
+    socket.on('connect', () => {
+      setStatus('connected', '正在进入实时协作…');
+      socket.emit('document:join', { document_id: documentId });
+    });
+
+    socket.on('disconnect', () => {
+      setStatus('error', '连接已断开，正在重连…');
+    });
+
+    socket.on('connect_error', () => {
+      setStatus('error', '实时连接失败，正在重试…');
+    });
+
+    socket.on('document:init', (state) => {
+      if (state.document_id !== documentId) return;
+      const localValue = editor.value;
+      if (!initializedFromSocket && localValue === initialContent) {
+        replaceEditorValue(state.content);
+      } else if (localValue !== serverContent) {
+        replaceEditorValue(mergeLocalChanges(serverContent, localValue, state.content));
+      } else {
+        replaceEditorValue(state.content);
+      }
+      serverContent = state.content;
+      serverVersion = state.version;
+      inflight = null;
+      initializedFromSocket = true;
+      setStatus('connected', '实时协作已连接');
+      if (editor.value !== serverContent) scheduleSend();
+    });
+
+    socket.on('document:state', (state) => {
+      if (state.document_id !== documentId) return;
+      const oldServerContent = serverContent;
+      const isOwnUpdate = state.origin === socket.id;
+
+      if (isOwnUpdate && inflight) {
+        const unsentValue = editor.value;
+        const sentValue = inflight.content;
+        inflight = null;
+        replaceEditorValue(
+          unsentValue === sentValue
+            ? state.content
+            : mergeLocalChanges(sentValue, unsentValue, state.content)
+        );
+      } else if (!inflight) {
+        replaceEditorValue(
+          editor.value === oldServerContent
+            ? state.content
+            : mergeLocalChanges(oldServerContent, editor.value, state.content)
+        );
+      }
+
+      serverContent = state.content;
+      serverVersion = state.version;
+      setStatus('connected', editor.value === serverContent ? '所有更改已同步' : '正在同步…');
+
+      if (editor.value !== serverContent) scheduleSend();
+      maybeSave();
+    });
+
+    socket.on('document:error', (state) => {
+      if (state.document_id && state.document_id !== documentId) return;
+      const localValue = editor.value;
+      const localBase = inflight ? inflight.baseContent : serverContent;
+      inflight = null;
+      serverContent = state.content;
+      serverVersion = state.version;
+      replaceEditorValue(mergeLocalChanges(localBase, localValue, state.content));
+      setStatus('error', state.message || '同步冲突，正在重新合并…');
+      scheduleSend();
+    });
+
+    socket.on('document:saved', (state) => {
+      if (state.document_id !== documentId) return;
+      saveBtn.disabled = false;
+      setStatus('connected', '已保存');
+    });
+
+    editor.addEventListener('input', () => {
+      scheduleLineLayout();
+      updateActiveLine();
+      scheduleRender();
+      scheduleSend();
+    });
+
+    editor.addEventListener('scroll', () => {
+      syncGutter();
+      syncPreviewFromEditor();
+    }, { passive: true });
+
+    preview.addEventListener('scroll', syncEditorFromPreview, { passive: true });
+    editor.addEventListener('click', updateActiveLine);
+    editor.addEventListener('keyup', updateActiveLine);
+    editor.addEventListener('select', updateActiveLine);
+
+    documentTitle.addEventListener('input', () => {
+      window.clearTimeout(titleSaveTimer);
+      titleSaveTimer = window.setTimeout(saveTitle, 500);
+    });
+    documentTitle.addEventListener('change', saveTitle);
+
+    toggleEdit.addEventListener('click', () => {
+      editor.disabled = !editor.disabled;
+      toggleEdit.textContent = editor.disabled ? '开启编辑' : '关闭编辑';
+      if (!editor.disabled) editor.focus();
+    });
+
+    saveBtn.addEventListener('click', () => {
+      if (!socket.connected) {
+        setStatus('error', '尚未连接，暂时无法保存');
+        return;
+      }
+      saveBtn.disabled = true;
+      saveRequested = true;
+      sendPendingChanges();
+      maybeSave();
+    });
+
+    window.addEventListener('beforeunload', (event) => {
+      if (editor.value !== serverContent || inflight) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    });
+
+    new ResizeObserver(() => {
+      scheduleLineLayout();
+      syncPreviewFromEditor();
+    }).observe(editor);
+
+    document.title = `${initialTitle} · Markdown 编辑器`;
+    scheduleLineLayout();
+    updateActiveLine();
+    renderMarkdown();
+  </script>
+</body>
+</html>

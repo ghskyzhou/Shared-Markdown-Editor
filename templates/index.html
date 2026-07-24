@@ -941,6 +941,13 @@
       setStatus('connected', '已保存');
     });
 
+    socket.on('document:deleted', (state) => {
+      if (state.document_id !== documentId) return;
+      inflight = null;
+      serverContent = editor.value;
+      window.location.href = '/';
+    });
+
     editor.addEventListener('input', () => {
       scheduleLineLayout();
       updateActiveLine();

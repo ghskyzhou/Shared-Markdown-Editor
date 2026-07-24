@@ -95,6 +95,19 @@ class MarkdownEditorTests(unittest.TestCase):
             "新的 标题",
         )
 
+    def test_document_can_be_deleted_from_home(self):
+        client = main.app.test_client()
+        self.login(client)
+        main.get_document_state(self.document_id)
+
+        response = client.post(
+            f"/documents/{self.document_id}/delete",
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/")
+        self.assertIsNone(main.get_document_record(self.document_id))
+        self.assertNotIn(self.document_id, main.document_states)
+
     def test_concurrent_insertions_are_merged_and_broadcast(self):
         with main.connect_database() as connection:
             connection.execute(

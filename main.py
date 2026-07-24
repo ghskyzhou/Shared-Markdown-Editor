@@ -179,6 +179,15 @@ def rename_document(document_id: int, title: str) -> str:
     return cleaned_title
 
 
+def delete_document_record(document_id: int) -> bool:
+    with connect_database() as connection:
+        cursor = connection.execute(
+            "DELETE FROM documents WHERE id = ?",
+            (document_id,),
+        )
+        return cursor.rowcount == 1
+
+
 def display_document_time(value: str, now: datetime | None = None) -> tuple[str, str]:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
@@ -429,6 +438,22 @@ def save_document(document_id: int):
     except LookupError:
         abort(404)
     return jsonify({"status": "ok", "version": version})
+
+
+@app.route("/documents/<int:document_id>/delete", methods=["POST"])
+def delete_document(document_id: int):
+    if not delete_document_record(document_id):
+        abort(404)
+
+    with document_states_lock:
+        document_states.pop(document_id, None)
+
+    socketio.emit(
+        "document:deleted",
+        {"document_id": document_id},
+        room=document_room(document_id),
+    )
+    return redirect(url_for("index"))
 
 
 @socketio.on("connect")

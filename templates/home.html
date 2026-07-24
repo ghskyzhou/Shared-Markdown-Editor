@@ -90,7 +90,7 @@
     .column-header,
     .document-row {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(145px, 220px);
+      grid-template-columns: minmax(0, 1fr) minmax(145px, 220px) 80px;
       align-items: center;
       column-gap: 32px;
     }
@@ -122,8 +122,6 @@
     .document-row {
       min-height: 70px;
       padding: 0 20px;
-      color: inherit;
-      text-decoration: none;
       border-bottom: 1px solid var(--border);
       transition: background-color 120ms ease;
     }
@@ -132,18 +130,40 @@
       background: #f8fafc;
     }
 
-    .document-title {
+    .document-link {
       min-width: 0;
       overflow: hidden;
+      color: inherit;
       font-size: 16px;
       font-weight: 560;
+      text-decoration: none;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
 
+    .document-link:hover { color: var(--accent); }
+
     .document-time {
       color: #374151;
       font-size: 14px;
+    }
+
+    .delete-form {
+      justify-self: end;
+    }
+
+    .delete-button {
+      padding: 7px 10px;
+      color: #b42318;
+      background: transparent;
+      border: 1px solid transparent;
+      font-size: 13px;
+    }
+
+    .delete-button:hover {
+      color: #912018;
+      background: #fef3f2;
+      border-color: #fecdca;
     }
 
     .empty-state {
@@ -183,8 +203,8 @@
 
       .column-header,
       .document-row {
-        grid-template-columns: minmax(0, 1fr) 92px;
-        column-gap: 14px;
+        grid-template-columns: minmax(0, 1fr) 84px 58px;
+        column-gap: 10px;
         padding-right: 10px;
         padding-left: 10px;
       }
@@ -192,6 +212,7 @@
       .document-group h2 { padding-left: 10px; }
       .document-row { min-height: 64px; }
       .document-time { text-align: right; }
+      .delete-button { padding-right: 7px; padding-left: 7px; }
     }
   </style>
 </head>
@@ -214,6 +235,7 @@
       <div class="column-header" aria-hidden="true">
         <span>标题</span>
         <span>上次编辑时间</span>
+        <span>操作</span>
       </div>
 
       {% for group_name in ['今天', '更早'] %}
@@ -222,11 +244,18 @@
             <h2 id="group-{{ loop.index }}">{{ group_name }}</h2>
             <div class="document-list">
               {% for document in grouped_documents[group_name] %}
-                <a class="document-row"
-                   href="{{ url_for('edit_document', document_id=document.id) }}">
-                  <span class="document-title">{{ document.title }}</span>
+                <div class="document-row">
+                  <a class="document-link"
+                     href="{{ url_for('edit_document', document_id=document.id) }}">
+                    {{ document.title }}
+                  </a>
                   <time class="document-time">{{ document.display_time }}</time>
-                </a>
+                  <form class="delete-form" method="post"
+                        action="{{ url_for('delete_document', document_id=document.id) }}"
+                        data-document-title="{{ document.title }}">
+                    <button class="delete-button" type="submit">删除</button>
+                  </form>
+                </div>
               {% endfor %}
             </div>
           </section>
@@ -239,5 +268,16 @@
       </div>
     {% endif %}
   </main>
+  <script>
+    document.querySelectorAll('.delete-form').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        const title = form.dataset.documentTitle || '此文档';
+        const confirmed = window.confirm(
+          `确定要删除《${title}》吗？删除后无法恢复。`
+        );
+        if (!confirmed) event.preventDefault();
+      });
+    });
+  </script>
 </body>
 </html>

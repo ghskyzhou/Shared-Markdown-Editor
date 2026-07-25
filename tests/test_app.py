@@ -75,6 +75,7 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertIn("共享 Markdown 编辑器".encode(), home.data)
         self.assertIn("测试文档".encode(), home.data)
         self.assertIn("上次编辑时间".encode(), home.data)
+        self.assertIn(b'id="themeToggle"', home.data)
 
         created = client.post("/documents")
         self.assertEqual(created.status_code, 302)
@@ -199,6 +200,8 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         page = response.get_data(as_text=True)
         self.assertIn("断网状态禁止编辑", page)
+        self.assertIn('id="themeToggle"', page)
+        self.assertIn('id="mobileViewToggle"', page)
         self.assertNotIn('id="saveBtn"', page)
         self.assertNotIn('id="toggleEdit"', page)
         self.assertEqual(

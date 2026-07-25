@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>共享 Markdown 编辑器</title>
 
+  <script>
+    (() => {
+      try {
+        const savedTheme = localStorage.getItem('markdown-editor-theme');
+        const preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light';
+        document.documentElement.dataset.theme = savedTheme || preferredTheme;
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <script>
@@ -32,6 +45,49 @@
       --soft: #f7f7f8;
       --active-line: rgba(17, 24, 39, 0.055);
       --line-height: 24px;
+      --ink: #202124;
+      --title-ink: #27272a;
+      --body-bg: #fafafa;
+      --header-bg: #ffffff;
+      --editor-ink: #24292f;
+      --caret: #111827;
+      --gutter-bg: #fafafa;
+      --gutter-border: #eeeeef;
+      --line-number: #a1a1aa;
+      --line-number-active: #4b5563;
+      --disabled-ink: #6b7280;
+      --empty-ink: #9ca3af;
+      --code-bg: #f6f8fa;
+      --quote-ink: #57606a;
+      --quote-border: #d0d7de;
+      --control-border: #d8dadd;
+      --control-hover: #efeff0;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --border: #30363d;
+      --muted: #8b949e;
+      --surface: #0d1117;
+      --soft: #21262d;
+      --active-line: rgba(110, 118, 129, 0.14);
+      --ink: #c9d1d9;
+      --title-ink: #e6edf3;
+      --body-bg: #010409;
+      --header-bg: #161b22;
+      --editor-ink: #c9d1d9;
+      --caret: #f0f6fc;
+      --gutter-bg: #010409;
+      --gutter-border: #21262d;
+      --line-number: #6e7681;
+      --line-number-active: #c9d1d9;
+      --disabled-ink: #6e7681;
+      --empty-ink: #6e7681;
+      --code-bg: #161b22;
+      --quote-ink: #8b949e;
+      --quote-border: #3b434b;
+      --control-border: #30363d;
+      --control-hover: #30363d;
     }
 
     * { box-sizing: border-box; }
@@ -46,8 +102,8 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
-      color: #202124;
-      background: #fafafa;
+      color: var(--ink);
+      background: var(--body-bg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
                    "Microsoft YaHei", sans-serif;
     }
@@ -58,7 +114,7 @@
       min-height: 50px;
       padding: 7px 14px;
       gap: 12px;
-      background: #fff;
+      background: var(--header-bg);
       border-bottom: 1px solid var(--border);
     }
 
@@ -69,13 +125,13 @@
       white-space: nowrap;
     }
 
-    .home-link:hover { color: #202124; }
+    .home-link:hover { color: var(--ink); }
 
     #documentTitle {
       width: min(460px, 58vw);
       padding: 6px 8px;
       overflow: hidden;
-      color: #27272a;
+      color: var(--title-ink);
       background: transparent;
       border: 1px solid transparent;
       border-radius: 6px;
@@ -84,14 +140,14 @@
       text-overflow: ellipsis;
     }
 
-    #documentTitle:hover { border-color: #e4e4e7; }
+    #documentTitle:hover { border-color: var(--border); }
     #documentTitle:focus {
-      border-color: #a1a1aa;
-      background: #fff;
+      border-color: var(--muted);
+      background: var(--header-bg);
     }
 
     #documentTitle:disabled {
-      color: #6b7280;
+      color: var(--disabled-ink);
       cursor: not-allowed;
     }
 
@@ -122,9 +178,9 @@
       flex: 0 0 58px;
       height: 100%;
       overflow: hidden;
-      color: #a1a1aa;
-      background: #fafafa;
-      border-right: 1px solid #eeeeef;
+      color: var(--line-number);
+      background: var(--gutter-bg);
+      border-right: 1px solid var(--gutter-border);
       font: 13px/var(--line-height) "SFMono-Regular", Consolas, "Liberation Mono", monospace;
       text-align: right;
       user-select: none;
@@ -146,7 +202,7 @@
     }
 
     .line-number.active {
-      color: #4b5563;
+      color: var(--line-number-active);
       font-weight: 600;
     }
 
@@ -182,9 +238,9 @@
       border: 0;
       outline: 0;
       resize: none;
-      color: #24292f;
+      color: var(--editor-ink);
       background: transparent;
-      caret-color: #111827;
+      caret-color: var(--caret);
       font: 15px/var(--line-height) "SFMono-Regular", Consolas,
             "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans Mono CJK SC",
             "Noto Sans SC", monospace;
@@ -196,7 +252,7 @@
     }
 
     #editor:disabled {
-      color: #6b7280;
+      color: var(--disabled-ink);
       cursor: not-allowed;
     }
 
@@ -237,7 +293,7 @@
 
     #preview .empty-preview {
       margin-top: 4px;
-      color: #9ca3af;
+      color: var(--empty-ink);
     }
 
     #preview h1,
@@ -264,7 +320,7 @@
     #preview pre {
       padding: 14px 16px;
       overflow-x: hidden;
-      background: #f6f8fa;
+      background: var(--code-bg);
       border-radius: 8px;
       box-shadow: inset 0 0 0 1px rgba(31, 35, 40, 0.04);
       white-space: pre-wrap;
@@ -286,8 +342,8 @@
     #preview blockquote {
       margin-left: 0;
       padding-left: 1em;
-      color: #57606a;
-      border-left: 4px solid #d0d7de;
+      color: var(--quote-ink);
+      border-left: 4px solid var(--quote-border);
     }
 
     .toolbar {
@@ -296,7 +352,7 @@
       min-height: 52px;
       padding: 8px 14px;
       gap: 10px;
-      background: #fff;
+      background: var(--header-bg);
       border-top: 1px solid var(--border);
     }
 
@@ -321,30 +377,142 @@
     .connection-status.connected .status-dot { background: #22c55e; }
     .connection-status.error .status-dot { background: #ef4444; }
 
+    .theme-toggle {
+      display: inline-grid;
+      width: 36px;
+      height: 36px;
+      padding: 0;
+      margin-left: auto;
+      place-items: center;
+      color: var(--title-ink);
+      background: var(--soft);
+      border: 1px solid var(--control-border);
+      border-radius: 7px;
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .theme-toggle:hover { background: var(--control-hover); }
+
+    .mobile-view-toggle {
+      display: none;
+      padding: 7px 13px;
+      color: var(--title-ink);
+      background: var(--soft);
+      border: 1px solid var(--control-border);
+      border-radius: 7px;
+      font: inherit;
+      font-size: 14px;
+      line-height: 1.4;
+      cursor: pointer;
+    }
+
+    .mobile-view-toggle:hover { background: var(--control-hover); }
+
     .exit-link {
       padding: 7px 13px;
-      color: #27272a;
+      color: var(--title-ink);
       background: var(--soft);
-      border: 1px solid #d8dadd;
+      border: 1px solid var(--control-border);
       border-radius: 7px;
       font-size: 14px;
       text-decoration: none;
     }
 
-    .exit-link:hover { background: #efeff0; }
+    .exit-link:hover { background: var(--control-hover); }
+
+    :root[data-theme="dark"] .hljs {
+      color: #c9d1d9;
+      background: var(--code-bg);
+    }
+
+    :root[data-theme="dark"] .hljs-keyword,
+    :root[data-theme="dark"] .hljs-doctag,
+    :root[data-theme="dark"] .hljs-template-tag,
+    :root[data-theme="dark"] .hljs-template-variable,
+    :root[data-theme="dark"] .hljs-type,
+    :root[data-theme="dark"] .hljs-variable.language_ {
+      color: #ff7b72;
+    }
+
+    :root[data-theme="dark"] .hljs-title,
+    :root[data-theme="dark"] .hljs-title.class_,
+    :root[data-theme="dark"] .hljs-title.class_.inherited__,
+    :root[data-theme="dark"] .hljs-title.function_ {
+      color: #d2a8ff;
+    }
+
+    :root[data-theme="dark"] .hljs-attr,
+    :root[data-theme="dark"] .hljs-attribute,
+    :root[data-theme="dark"] .hljs-literal,
+    :root[data-theme="dark"] .hljs-meta,
+    :root[data-theme="dark"] .hljs-number,
+    :root[data-theme="dark"] .hljs-operator,
+    :root[data-theme="dark"] .hljs-selector-attr,
+    :root[data-theme="dark"] .hljs-selector-class,
+    :root[data-theme="dark"] .hljs-selector-id,
+    :root[data-theme="dark"] .hljs-variable {
+      color: #79c0ff;
+    }
+
+    :root[data-theme="dark"] .hljs-string,
+    :root[data-theme="dark"] .hljs-regexp,
+    :root[data-theme="dark"] .hljs-symbol {
+      color: #a5d6ff;
+    }
+
+    :root[data-theme="dark"] .hljs-comment,
+    :root[data-theme="dark"] .hljs-code,
+    :root[data-theme="dark"] .hljs-formula {
+      color: #8b949e;
+    }
 
     @media (max-width: 760px) {
-      .workspace { flex-direction: column; }
+      .workspace {
+        position: relative;
+        display: block;
+      }
+
       .editor-pane,
       #preview {
+        position: absolute;
+        inset: 0;
         width: 100%;
-        height: 50%;
+        height: 100%;
       }
+
       .editor-pane {
+        z-index: 1;
         border-right: 0;
-        border-bottom: 1px solid var(--border);
+        visibility: visible;
       }
-      #preview { padding: 20px 22px 44px; }
+
+      #preview {
+        z-index: 0;
+        padding: 20px 22px 44px;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      body.mobile-preview .editor-pane {
+        z-index: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      body.mobile-preview #preview {
+        z-index: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+
+      .mobile-view-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
       .gutter { flex-basis: 48px; }
       .connection-status span:last-child {
         overflow: hidden;
@@ -359,6 +527,10 @@
     <a class="home-link" href="{{ url_for('index') }}">Markdown 文档</a>
     <input id="documentTitle" type="text" maxlength="160" disabled
            value="{{ document_title }}" aria-label="文档标题">
+    <button id="themeToggle" class="theme-toggle" type="button"
+            aria-label="切换到黑夜模式" title="切换到黑夜模式">
+      <span id="themeIcon" aria-hidden="true">☾</span>
+    </button>
   </header>
 
   <main class="workspace">
@@ -382,6 +554,8 @@
       <span class="status-dot" aria-hidden="true"></span>
       <span id="statusText">正在连接服务器…</span>
     </div>
+    <button id="mobileViewToggle" class="mobile-view-toggle" type="button"
+            aria-label="切换到预览">预览</button>
     <a class="exit-link" href="{{ url_for('index') }}">退出</a>
   </footer>
 
@@ -399,6 +573,9 @@
     const documentTitle = document.getElementById('documentTitle');
     const connectionStatus = document.getElementById('connectionStatus');
     const statusText = document.getElementById('statusText');
+    const themeToggle = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
+    const mobileViewToggle = document.getElementById('mobileViewToggle');
 
     let serverContent = initialContent;
     let serverVersion = initialVersion;
@@ -416,6 +593,48 @@
     let deferredRealtimeEvents = [];
 
     editor.value = initialContent;
+
+    function applyTheme(theme, persist = false) {
+      const isDark = theme === 'dark';
+      document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+      themeIcon.textContent = isDark ? '☀' : '☾';
+      const nextMode = isDark ? '白天模式' : '黑夜模式';
+      themeToggle.setAttribute('aria-label', `切换到${nextMode}`);
+      themeToggle.title = `切换到${nextMode}`;
+      if (persist) {
+        try {
+          localStorage.setItem('markdown-editor-theme', isDark ? 'dark' : 'light');
+        } catch {}
+      }
+    }
+
+    applyTheme(document.documentElement.dataset.theme);
+    themeToggle.addEventListener('click', () => {
+      applyTheme(
+        document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark',
+        true
+      );
+    });
+
+    mobileViewToggle.addEventListener('click', () => {
+      const showPreview = !document.body.classList.contains('mobile-preview');
+      document.body.classList.toggle('mobile-preview', showPreview);
+      mobileViewToggle.textContent = showPreview ? '编辑' : '预览';
+      mobileViewToggle.setAttribute(
+        'aria-label',
+        showPreview ? '切换到编辑' : '切换到预览'
+      );
+
+      if (showPreview) {
+        editor.blur();
+        renderMarkdown();
+        window.requestAnimationFrame(syncPreviewFromEditor);
+      } else {
+        scheduleLineLayout();
+        updateActiveLine();
+        if (!editor.disabled) editor.focus({ preventScroll: true });
+      }
+    });
 
     function setStatus(kind, message) {
       connectionStatus.classList.toggle('connected', kind === 'connected');

@@ -4,6 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>共享 Markdown 编辑器</title>
+  <script>
+    (() => {
+      try {
+        const savedTheme = localStorage.getItem('markdown-editor-theme');
+        const preferredTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light';
+        document.documentElement.dataset.theme = savedTheme || preferredTheme;
+      } catch {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <style>
     :root {
       color-scheme: light;
@@ -12,6 +25,39 @@
       --border: #e2e5e9;
       --accent: #2563eb;
       --accent-hover: #1d4ed8;
+      --accent-text: #ffffff;
+      --page-bg: #ffffff;
+      --soft: #f4f5f6;
+      --row-hover: #f8fafc;
+      --secondary-text: #374151;
+      --column-text: #4b5563;
+      --danger: #b42318;
+      --danger-hover: #912018;
+      --danger-bg: #fef3f2;
+      --danger-border: #fecdca;
+      --empty-bg: #fafafa;
+      --empty-border: #d6d9de;
+    }
+
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --ink: #e6edf3;
+      --muted: #8b949e;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --accent-text: #0d1117;
+      --page-bg: #0d1117;
+      --soft: #21262d;
+      --row-hover: #161b22;
+      --secondary-text: #c9d1d9;
+      --column-text: #b1bac4;
+      --danger: #ff7b72;
+      --danger-hover: #ffa198;
+      --danger-bg: rgba(248, 81, 73, 0.12);
+      --danger-border: rgba(248, 81, 73, 0.42);
+      --empty-bg: #161b22;
+      --empty-border: #30363d;
     }
 
     * { box-sizing: border-box; }
@@ -23,7 +69,7 @@
 
     body {
       color: var(--ink);
-      background: #fff;
+      background: var(--page-bg);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
                    "Microsoft YaHei", sans-serif;
     }
@@ -65,7 +111,7 @@
 
     .new-button {
       padding: 8px 13px;
-      color: #fff;
+      color: var(--accent-text);
       background: var(--accent);
       border: 1px solid var(--accent);
       font-size: 14px;
@@ -84,8 +130,23 @@
 
     .logout-button:hover {
       color: var(--ink);
-      background: #f4f5f6;
+      background: var(--soft);
     }
+
+    .theme-toggle {
+      display: inline-grid;
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      place-items: center;
+      color: var(--ink);
+      background: var(--soft);
+      border: 1px solid var(--border);
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .theme-toggle:hover { border-color: var(--muted); }
 
     .column-header,
     .document-row {
@@ -98,7 +159,7 @@
     .column-header {
       min-height: 42px;
       padding: 0 20px;
-      color: #4b5563;
+      color: var(--column-text);
       font-size: 13px;
       font-weight: 600;
       border-bottom: 1px solid var(--border);
@@ -127,7 +188,7 @@
     }
 
     .document-row:hover {
-      background: #f8fafc;
+      background: var(--row-hover);
     }
 
     .document-link {
@@ -144,7 +205,7 @@
     .document-link:hover { color: var(--accent); }
 
     .document-time {
-      color: #374151;
+      color: var(--secondary-text);
       font-size: 14px;
     }
 
@@ -154,16 +215,16 @@
 
     .delete-button {
       padding: 7px 10px;
-      color: #b42318;
+      color: var(--danger);
       background: transparent;
       border: 1px solid transparent;
       font-size: 13px;
     }
 
     .delete-button:hover {
-      color: #912018;
-      background: #fef3f2;
-      border-color: #fecdca;
+      color: var(--danger-hover);
+      background: var(--danger-bg);
+      border-color: var(--danger-border);
     }
 
     .empty-state {
@@ -171,8 +232,8 @@
       padding: 54px 24px;
       color: var(--muted);
       text-align: center;
-      background: #fafafa;
-      border: 1px dashed #d6d9de;
+      background: var(--empty-bg);
+      border: 1px dashed var(--empty-border);
       border-radius: 12px;
     }
 
@@ -224,6 +285,10 @@
         <form method="post" action="{{ url_for('new_document') }}">
           <button class="new-button" type="submit">新建 Markdown</button>
         </form>
+        <button id="themeToggle" class="theme-toggle" type="button"
+                aria-label="切换到黑夜模式" title="切换到黑夜模式">
+          <span id="themeIcon" aria-hidden="true">☾</span>
+        </button>
         <form method="post" action="{{ url_for('logout') }}">
           <button class="logout-button" type="submit">退出登录</button>
         </form>
@@ -269,6 +334,31 @@
     {% endif %}
   </main>
   <script>
+    const themeToggle = document.getElementById('themeToggle');
+    const themeIcon = document.getElementById('themeIcon');
+
+    function applyTheme(theme, persist = false) {
+      const isDark = theme === 'dark';
+      document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+      themeIcon.textContent = isDark ? '☀' : '☾';
+      const nextMode = isDark ? '白天模式' : '黑夜模式';
+      themeToggle.setAttribute('aria-label', `切换到${nextMode}`);
+      themeToggle.title = `切换到${nextMode}`;
+      if (persist) {
+        try {
+          localStorage.setItem('markdown-editor-theme', isDark ? 'dark' : 'light');
+        } catch {}
+      }
+    }
+
+    applyTheme(document.documentElement.dataset.theme);
+    themeToggle.addEventListener('click', () => {
+      applyTheme(
+        document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark',
+        true
+      );
+    });
+
     document.querySelectorAll('.delete-form').forEach((form) => {
       form.addEventListener('submit', (event) => {
         const title = form.dataset.documentTitle || '此文档';

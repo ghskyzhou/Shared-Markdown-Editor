@@ -320,6 +320,9 @@ class CollaborativeDocument:
 
 document_states: dict[int, CollaborativeDocument] = {}
 document_states_lock = threading.RLock()
+cursor_states: dict[int, dict[str, dict[str, Any]]] = {}
+socket_documents: dict[str, set[int]] = {}
+cursor_states_lock = threading.RLock()
 
 
 def get_document_state(document_id: int) -> CollaborativeDocument:
@@ -432,6 +435,8 @@ def delete_document(document_id: int):
 
     with document_states_lock:
         document_states.pop(document_id, None)
+    with cursor_states_lock:
+        cursor_states.pop(document_id, None)
 
     socketio.emit(
         "document:deleted",
@@ -461,9 +466,81 @@ def document_join(data):
 
     join_room(document_room(document_id))
     content, version = state.snapshot()
+    with cursor_states_lock:
+        socket_documents.setdefault(request.sid, set()).add(document_id)
+        active_cursors = [
+            cursor.copy()
+            for client_id, cursor in cursor_states.get(document_id, {}).items()
+            if client_id != request.sid
+        ]
     emit(
         "document:init",
-        {"document_id": document_id, "content": content, "version": version},
+        {
+            "document_id": document_id,
+            "content": content,
+            "version": version,
+            "cursors": active_cursors,
+        },
+    )
+    return None
+
+
+@socketio.on("document:cursor")
+def document_cursor(data):
+    if not session.get("authenticated"):
+        return False
+
+    try:
+        data = data if isinstance(data, dict) else {}
+        document_id = int(data.get("document_id", -1))
+        with cursor_states_lock:
+            joined_document = document_id in socket_documents.get(
+                request.sid, set()
+            )
+        if not joined_document:
+            raise ValueError("尚未加入该文档")
+        get_document_state(document_id)
+    except (TypeError, ValueError, LookupError) as error:
+        emit(
+            "document:error",
+            {"document_id": data.get("document_id"), "message": str(error)},
+        )
+        return None
+
+    if data.get("visible") is False:
+        with cursor_states_lock:
+            cursor_states.get(document_id, {}).pop(request.sid, None)
+        socketio.emit(
+            "document:cursor:remove",
+            {"document_id": document_id, "client_id": request.sid},
+            room=document_room(document_id),
+            skip_sid=request.sid,
+        )
+        return None
+
+    try:
+        position = int(data.get("position", -1))
+        if position < 0 or position > MAX_DOCUMENT_SIZE:
+            raise ValueError("光标位置无效")
+    except (TypeError, ValueError) as error:
+        emit(
+            "document:error",
+            {"document_id": document_id, "message": str(error)},
+        )
+        return None
+
+    cursor = {
+        "document_id": document_id,
+        "client_id": request.sid,
+        "position": position,
+    }
+    with cursor_states_lock:
+        cursor_states.setdefault(document_id, {})[request.sid] = cursor
+    socketio.emit(
+        "document:cursor",
+        cursor,
+        room=document_room(document_id),
+        skip_sid=request.sid,
     )
     return None
 
@@ -506,6 +583,22 @@ def document_update(data):
         room=document_room(document_id),
     )
     return None
+
+
+@socketio.on("disconnect")
+def socket_disconnect():
+    client_id = request.sid
+    with cursor_states_lock:
+        document_ids = socket_documents.pop(client_id, set())
+        for document_id in document_ids:
+            cursor_states.get(document_id, {}).pop(client_id, None)
+
+    for document_id in document_ids:
+        socketio.emit(
+            "document:cursor:remove",
+            {"document_id": document_id, "client_id": client_id},
+            room=document_room(document_id),
+        )
 
 
 initialize_database()

@@ -16,11 +16,15 @@ class MarkdownEditorTests(unittest.TestCase):
             DATABASE=str(database_path),
         )
         main.document_states.clear()
+        main.cursor_states.clear()
+        main.socket_documents.clear()
         main.initialize_database(migrate_legacy=False)
         self.document_id = main.create_document("测试文档")
 
     def tearDown(self):
         main.document_states.clear()
+        main.cursor_states.clear()
+        main.socket_documents.clear()
         self.temporary_directory.cleanup()
 
     def login(self, client):
@@ -76,6 +80,7 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertIn("测试文档".encode(), home.data)
         self.assertIn("上次编辑时间".encode(), home.data)
         self.assertIn(b'id="themeToggle"', home.data)
+        self.assertNotIn(b"<h2", home.data)
 
         created = client.post("/documents")
         self.assertEqual(created.status_code, 302)
@@ -166,6 +171,44 @@ class MarkdownEditorTests(unittest.TestCase):
         first.disconnect()
         second.disconnect()
 
+    def test_collaborator_cursor_is_broadcast_and_removed_on_disconnect(self):
+        first_http = main.app.test_client()
+        second_http = main.app.test_client()
+        self.login(first_http)
+        self.login(second_http)
+        first = self.joined_socket(first_http)
+        second = self.joined_socket(second_http)
+
+        first.emit(
+            "document:cursor",
+            {
+                "document_id": self.document_id,
+                "position": 3,
+                "visible": True,
+            },
+        )
+        cursor_events = [
+            event
+            for event in second.get_received()
+            if event["name"] == "document:cursor"
+        ]
+        self.assertEqual(len(cursor_events), 1)
+        cursor = cursor_events[0]["args"][0]
+        self.assertEqual(cursor["position"], 3)
+        self.assertNotIn(
+            "document:cursor",
+            [event["name"] for event in first.get_received()],
+        )
+
+        first.disconnect()
+        removal_events = [
+            event
+            for event in second.get_received()
+            if event["name"] == "document:cursor:remove"
+        ]
+        self.assertEqual(removal_events[-1]["args"][0]["client_id"], cursor["client_id"])
+        second.disconnect()
+
     def test_documents_use_separate_socket_rooms(self):
         other_document_id = main.create_document("另一篇")
         first_http = main.app.test_client()
@@ -202,6 +245,7 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertIn("断网状态禁止编辑", page)
         self.assertIn('id="themeToggle"', page)
         self.assertIn('id="mobileViewToggle"', page)
+        self.assertNotIn("协作者", page)
         self.assertNotIn('id="saveBtn"', page)
         self.assertNotIn('id="toggleEdit"', page)
         self.assertEqual(

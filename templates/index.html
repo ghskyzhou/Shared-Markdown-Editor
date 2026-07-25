@@ -50,7 +50,7 @@
       --body-bg: #fafafa;
       --header-bg: #ffffff;
       --editor-ink: #24292f;
-      --caret: #111827;
+      --caret: #2563eb;
       --gutter-bg: #fafafa;
       --gutter-border: #eeeeef;
       --line-number: #a1a1aa;
@@ -76,7 +76,7 @@
       --body-bg: #010409;
       --header-bg: #161b22;
       --editor-ink: #c9d1d9;
-      --caret: #f0f6fc;
+      --caret: #58a6ff;
       --gutter-bg: #010409;
       --gutter-border: #21262d;
       --line-number: #6e7681;
@@ -226,6 +226,31 @@
       will-change: transform;
     }
 
+    #remoteCursors {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .remote-cursor {
+      position: absolute;
+      width: 2px;
+      height: var(--line-height);
+      background: var(--cursor-color);
+      border-radius: 2px;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16),
+                  0 0 5px var(--cursor-color);
+      animation: remote-cursor-blink 1.1s steps(2, start) infinite;
+      will-change: transform;
+    }
+
+    @keyframes remote-cursor-blink {
+      0%, 58% { opacity: 1; }
+      59%, 100% { opacity: 0.34; }
+    }
+
     #editor {
       position: absolute;
       z-index: 1;
@@ -266,6 +291,24 @@
             "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans Mono CJK SC",
             "Noto Sans SC", monospace;
       tab-size: 2;
+      pointer-events: none;
+    }
+
+    #cursorMeasure {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: -1;
+      min-height: 100%;
+      padding: 16px 18px 40px;
+      visibility: hidden;
+      font: 15px/var(--line-height) "SFMono-Regular", Consolas,
+            "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans Mono CJK SC",
+            "Noto Sans SC", monospace;
+      tab-size: 2;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      word-break: normal;
       pointer-events: none;
     }
 
@@ -540,10 +583,12 @@
       </div>
       <div class="editor-stage">
         <div id="currentLine" aria-hidden="true"></div>
+        <div id="remoteCursors" aria-hidden="true"></div>
         <textarea id="editor" wrap="soft" spellcheck="false" disabled
                   aria-label="Markdown 文本"
                   placeholder="输入 Markdown 内容…"></textarea>
         <div id="lineMeasure" aria-hidden="true"></div>
+        <div id="cursorMeasure" aria-hidden="true"></div>
       </div>
     </section>
     <article id="preview" aria-label="Markdown 预览" aria-live="polite"></article>
@@ -569,7 +614,9 @@
     const preview = document.getElementById('preview');
     const lineNumbers = document.getElementById('lineNumbers');
     const lineMeasure = document.getElementById('lineMeasure');
+    const cursorMeasure = document.getElementById('cursorMeasure');
     const currentLine = document.getElementById('currentLine');
+    const remoteCursorLayer = document.getElementById('remoteCursors');
     const documentTitle = document.getElementById('documentTitle');
     const connectionStatus = document.getElementById('connectionStatus');
     const statusText = document.getElementById('statusText');
@@ -588,9 +635,11 @@
     let scrollLockTimer = null;
     let lineLayoutFrame = null;
     let titleSaveTimer = null;
+    let cursorSendTimer = null;
     let lineLayouts = [];
     let isComposing = false;
     let deferredRealtimeEvents = [];
+    const remoteCursors = new Map();
 
     editor.value = initialContent;
 
@@ -615,6 +664,118 @@
         true
       );
     });
+
+    const collaboratorColors = [
+      '#2f81f7',
+      '#a371f7',
+      '#e85d75',
+      '#1f9d8a',
+      '#db6d28',
+      '#8250df'
+    ];
+
+    function collaboratorColor(clientId) {
+      let hash = 0;
+      for (const character of clientId) {
+        hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+      }
+      return collaboratorColors[Math.abs(hash) % collaboratorColors.length];
+    }
+
+    function caretCoordinates(position) {
+      const safePosition = Math.max(0, Math.min(editor.value.length, position));
+      const marker = document.createElement('span');
+      marker.className = 'cursor-measure-marker';
+      marker.textContent = editor.value.slice(safePosition) || '.';
+
+      cursorMeasure.style.width = `${editor.clientWidth}px`;
+      cursorMeasure.replaceChildren(
+        document.createTextNode(editor.value.slice(0, safePosition)),
+        marker
+      );
+
+      return {
+        left: marker.offsetLeft - editor.scrollLeft,
+        top: marker.offsetTop - editor.scrollTop
+      };
+    }
+
+    function renderRemoteCursors() {
+      const fragment = document.createDocumentFragment();
+      const localEdit = calculateSplice(serverContent, editor.value);
+
+      Array.from(remoteCursors.values()).slice(0, 30).forEach((remoteCursor) => {
+        let position = remoteCursor.position;
+        if (localEdit) {
+          position = transformPosition(position, localEdit, false);
+        }
+        const coordinates = caretCoordinates(position);
+        if (
+          coordinates.top < -24 ||
+          coordinates.top > editor.clientHeight ||
+          coordinates.left < -2 ||
+          coordinates.left > editor.clientWidth
+        ) return;
+
+        const cursor = document.createElement('div');
+        const color = collaboratorColor(remoteCursor.client_id);
+        cursor.className = 'remote-cursor';
+        cursor.style.setProperty('--cursor-color', color);
+        cursor.style.transform =
+          `translate(${Math.max(0, coordinates.left)}px, ${coordinates.top}px)`;
+        fragment.appendChild(cursor);
+      });
+
+      remoteCursorLayer.replaceChildren(fragment);
+    }
+
+    function broadcastLocalCursor() {
+      cursorSendTimer = null;
+      if (
+        !connectionReady ||
+        isComposing ||
+        !socket.connected ||
+        inflight ||
+        editor.value !== serverContent ||
+        document.activeElement !== editor
+      ) return;
+      socket.emit('document:cursor', {
+        document_id: documentId,
+        position: editor.selectionEnd,
+        visible: true
+      });
+    }
+
+    function scheduleCursorBroadcast() {
+      window.clearTimeout(cursorSendTimer);
+      cursorSendTimer = window.setTimeout(broadcastLocalCursor, 45);
+    }
+
+    function hideLocalCursor() {
+      window.clearTimeout(cursorSendTimer);
+      cursorSendTimer = null;
+      if (!connectionReady || !socket.connected) return;
+      socket.emit('document:cursor', {
+        document_id: documentId,
+        visible: false
+      });
+    }
+
+    function transformRemoteCursors(operation) {
+      if (!operation) return;
+      const applied = {
+        start: operation.start,
+        deleteCount: operation.delete_count,
+        insert: operation.insert
+      };
+      remoteCursors.forEach((remoteCursor) => {
+        remoteCursor.position = transformPosition(
+          remoteCursor.position,
+          applied,
+          true
+        );
+      });
+    }
 
     mobileViewToggle.addEventListener('click', () => {
       const showPreview = !document.body.classList.contains('mobile-preview');
@@ -652,11 +813,15 @@
     function enterOfflineMode() {
       window.clearTimeout(sendTimer);
       window.clearTimeout(titleSaveTimer);
+      window.clearTimeout(cursorSendTimer);
       sendTimer = null;
       titleSaveTimer = null;
+      cursorSendTimer = null;
       inflight = null;
       isComposing = false;
       deferredRealtimeEvents = [];
+      remoteCursors.clear();
+      remoteCursorLayer.replaceChildren();
       setEditingAvailable(false);
       setStatus('error', '断网状态禁止编辑');
     }
@@ -833,6 +998,7 @@
     function syncGutter() {
       lineNumbers.style.transform = `translateY(${-editor.scrollTop}px)`;
       updateActiveLine();
+      renderRemoteCursors();
     }
 
     function sourcePositionForEditorScroll(scrollTop) {
@@ -1094,14 +1260,26 @@
       serverVersion = state.version;
       inflight = null;
       deferredRealtimeEvents = [];
+      remoteCursors.clear();
+      (state.cursors || []).forEach((cursor) => {
+        if (
+          cursor.client_id &&
+          cursor.client_id !== socket.id &&
+          Number.isInteger(cursor.position)
+        ) {
+          remoteCursors.set(cursor.client_id, cursor);
+        }
+      });
       setEditingAvailable(true);
       setStatus('connected', '所有更改已同步');
+      window.requestAnimationFrame(renderRemoteCursors);
     }
 
     function handleDocumentState(state) {
       if (state.document_id !== documentId) return;
       const oldServerContent = serverContent;
       const isOwnUpdate = state.origin === socket.id;
+      transformRemoteCursors(state.operation);
 
       if (isOwnUpdate && inflight) {
         const unsentValue = editor.value;
@@ -1128,6 +1306,8 @@
       );
 
       if (editor.value !== serverContent) scheduleSend();
+      renderRemoteCursors();
+      if (document.activeElement === editor) scheduleCursorBroadcast();
     }
 
     function handleDocumentError(state) {
@@ -1213,6 +1393,22 @@
       receiveRealtimeEvent('error', state);
     });
 
+    socket.on('document:cursor', (state) => {
+      if (
+        state.document_id !== documentId ||
+        state.client_id === socket.id ||
+        !Number.isInteger(state.position)
+      ) return;
+      remoteCursors.set(state.client_id, state);
+      renderRemoteCursors();
+    });
+
+    socket.on('document:cursor:remove', (state) => {
+      if (state.document_id !== documentId) return;
+      remoteCursors.delete(state.client_id);
+      renderRemoteCursors();
+    });
+
     socket.on('document:deleted', (state) => {
       if (state.document_id !== documentId) return;
       inflight = null;
@@ -1236,13 +1432,17 @@
       scheduleRender();
       flushDeferredRealtimeEvents();
       if (editor.value !== serverContent) scheduleSend();
+      scheduleCursorBroadcast();
     });
 
     editor.addEventListener('input', (event) => {
       scheduleLineLayout();
       updateActiveLine();
       scheduleRender();
-      if (!isComposing && !event.isComposing) scheduleSend();
+      if (!isComposing && !event.isComposing) {
+        scheduleSend();
+        scheduleCursorBroadcast();
+      }
     });
 
     editor.addEventListener('scroll', () => {
@@ -1254,6 +1454,11 @@
     editor.addEventListener('click', updateActiveLine);
     editor.addEventListener('keyup', updateActiveLine);
     editor.addEventListener('select', updateActiveLine);
+    editor.addEventListener('click', scheduleCursorBroadcast);
+    editor.addEventListener('keyup', scheduleCursorBroadcast);
+    editor.addEventListener('select', scheduleCursorBroadcast);
+    editor.addEventListener('focus', scheduleCursorBroadcast);
+    editor.addEventListener('blur', hideLocalCursor);
 
     documentTitle.addEventListener('input', () => {
       window.clearTimeout(titleSaveTimer);

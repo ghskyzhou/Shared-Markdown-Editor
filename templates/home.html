@@ -165,23 +165,8 @@
       border-bottom: 1px solid var(--border);
     }
 
-    .document-group {
-      margin-top: 26px;
-    }
-
-    .document-group h2 {
-      margin: 0;
-      padding: 0 20px 12px;
-      font-size: 16px;
-      font-weight: 650;
-    }
-
-    .document-list {
-      border-top: 1px solid var(--border);
-    }
-
     .document-row {
-      min-height: 70px;
+      min-height: 62px;
       padding: 0 20px;
       border-bottom: 1px solid var(--border);
       transition: background-color 120ms ease;
@@ -270,8 +255,7 @@
         padding-left: 10px;
       }
 
-      .document-group h2 { padding-left: 10px; }
-      .document-row { min-height: 64px; }
+      .document-row { min-height: 58px; }
       .document-time { text-align: right; }
       .delete-button { padding-right: 7px; padding-left: 7px; }
     }
@@ -303,29 +287,24 @@
         <span>操作</span>
       </div>
 
-      {% for group_name in ['今天', '更早'] %}
-        {% if grouped_documents[group_name] %}
-          <section class="document-group" aria-labelledby="group-{{ loop.index }}">
-            <h2 id="group-{{ loop.index }}">{{ group_name }}</h2>
-            <div class="document-list">
-              {% for document in grouped_documents[group_name] %}
-                <div class="document-row">
-                  <a class="document-link"
-                     href="{{ url_for('edit_document', document_id=document.id) }}">
-                    {{ document.title }}
-                  </a>
-                  <time class="document-time">{{ document.display_time }}</time>
-                  <form class="delete-form" method="post"
-                        action="{{ url_for('delete_document', document_id=document.id) }}"
-                        data-document-title="{{ document.title }}">
-                    <button class="delete-button" type="submit">删除</button>
-                  </form>
-                </div>
-              {% endfor %}
+      <div class="document-list">
+        {% for group_name in ['今天', '更早'] %}
+          {% for document in grouped_documents[group_name] %}
+            <div class="document-row">
+              <a class="document-link"
+                 href="{{ url_for('edit_document', document_id=document.id) }}">
+                {{ document.title }}
+              </a>
+              <time class="document-time">{{ document.display_time }}</time>
+              <form class="delete-form" method="post"
+                    action="{{ url_for('delete_document', document_id=document.id) }}"
+                    data-document-title="{{ document.title }}">
+                <button class="delete-button" type="submit">删除</button>
+              </form>
             </div>
-          </section>
-        {% endif %}
-      {% endfor %}
+          {% endfor %}
+        {% endfor %}
+      </div>
     {% else %}
       <div class="empty-state">
         <strong>还没有 Markdown 文档</strong>

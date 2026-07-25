@@ -207,6 +207,12 @@ class MarkdownEditorTests(unittest.TestCase):
         merged = document.merge("aef", 0)
         self.assertEqual(merged["content"], "aXef")
 
+    def test_concurrent_chinese_insertions_are_preserved(self):
+        document = main.CollaborativeDocument(self.document_id, "")
+        document.merge("你好", 0)
+        merged = document.merge("世界", 0)
+        self.assertEqual(merged["content"], "你好世界")
+
     def test_home_time_is_formatted_in_local_timezone(self):
         shanghai_timezone = timezone(timedelta(hours=8), name="Asia/Shanghai")
         now = datetime(2026, 7, 24, 20, 0, tzinfo=shanghai_timezone)

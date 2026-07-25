@@ -426,6 +426,8 @@
     let lineLayoutFrame = null;
     let titleSaveTimer = null;
     let lineLayouts = [];
+    let isComposing = false;
+    let deferredRealtimeEvents = [];
 
     editor.value = initialContent;
 
@@ -815,6 +817,7 @@
 
     function sendPendingChanges() {
       sendTimer = null;
+      if (isComposing) return;
       if (!socket.connected || inflight || editor.value === serverContent) {
         maybeSave();
         return;
@@ -833,7 +836,12 @@
     }
 
     function maybeSave() {
-      if (!saveRequested || inflight || editor.value !== serverContent) return;
+      if (
+        isComposing ||
+        !saveRequested ||
+        inflight ||
+        editor.value !== serverContent
+      ) return;
       saveRequested = false;
       socket.emit('document:save', { document_id: documentId });
     }
@@ -857,25 +865,7 @@
         .catch(() => setStatus('error', '标题暂时无法保存'));
     }
 
-    const socket = io({
-      transports: ['websocket', 'polling'],
-      reconnection: true
-    });
-
-    socket.on('connect', () => {
-      setStatus('connected', '正在进入实时协作…');
-      socket.emit('document:join', { document_id: documentId });
-    });
-
-    socket.on('disconnect', () => {
-      setStatus('error', '连接已断开，正在重连…');
-    });
-
-    socket.on('connect_error', () => {
-      setStatus('error', '实时连接失败，正在重试…');
-    });
-
-    socket.on('document:init', (state) => {
+    function handleDocumentInit(state) {
       if (state.document_id !== documentId) return;
       const localValue = editor.value;
       if (!initializedFromSocket && localValue === initialContent) {
@@ -891,9 +881,9 @@
       initializedFromSocket = true;
       setStatus('connected', '实时协作已连接');
       if (editor.value !== serverContent) scheduleSend();
-    });
+    }
 
-    socket.on('document:state', (state) => {
+    function handleDocumentState(state) {
       if (state.document_id !== documentId) return;
       const oldServerContent = serverContent;
       const isOwnUpdate = state.origin === socket.id;
@@ -917,14 +907,21 @@
 
       serverContent = state.content;
       serverVersion = state.version;
-      setStatus('connected', editor.value === serverContent ? '所有更改已同步' : '正在同步…');
+      setStatus(
+        'connected',
+        editor.value === serverContent ? '所有更改已同步' : '正在同步…'
+      );
 
       if (editor.value !== serverContent) scheduleSend();
       maybeSave();
-    });
+    }
 
-    socket.on('document:error', (state) => {
+    function handleDocumentError(state) {
       if (state.document_id && state.document_id !== documentId) return;
+      if (typeof state.content !== 'string') {
+        setStatus('error', state.message || '实时同步发生错误');
+        return;
+      }
       const localValue = editor.value;
       const localBase = inflight ? inflight.baseContent : serverContent;
       inflight = null;
@@ -933,6 +930,58 @@
       replaceEditorValue(mergeLocalChanges(localBase, localValue, state.content));
       setStatus('error', state.message || '同步冲突，正在重新合并…');
       scheduleSend();
+    }
+
+    function dispatchRealtimeEvent(type, state) {
+      if (type === 'init') handleDocumentInit(state);
+      if (type === 'state') handleDocumentState(state);
+      if (type === 'error') handleDocumentError(state);
+    }
+
+    function receiveRealtimeEvent(type, state) {
+      if (isComposing) {
+        deferredRealtimeEvents.push({ type, state });
+        return;
+      }
+      dispatchRealtimeEvent(type, state);
+    }
+
+    function flushDeferredRealtimeEvents() {
+      const queuedEvents = deferredRealtimeEvents;
+      deferredRealtimeEvents = [];
+      queuedEvents.forEach(({ type, state }) => {
+        dispatchRealtimeEvent(type, state);
+      });
+    }
+
+    const socket = io({
+      transports: ['websocket', 'polling'],
+      reconnection: true
+    });
+
+    socket.on('connect', () => {
+      setStatus('connected', '正在进入实时协作…');
+      socket.emit('document:join', { document_id: documentId });
+    });
+
+    socket.on('disconnect', () => {
+      setStatus('error', '连接已断开，正在重连…');
+    });
+
+    socket.on('connect_error', () => {
+      setStatus('error', '实时连接失败，正在重试…');
+    });
+
+    socket.on('document:init', (state) => {
+      receiveRealtimeEvent('init', state);
+    });
+
+    socket.on('document:state', (state) => {
+      receiveRealtimeEvent('state', state);
+    });
+
+    socket.on('document:error', (state) => {
+      receiveRealtimeEvent('error', state);
     });
 
     socket.on('document:saved', (state) => {
@@ -948,11 +997,30 @@
       window.location.href = '/';
     });
 
-    editor.addEventListener('input', () => {
+    editor.addEventListener('compositionstart', () => {
+      isComposing = true;
+      window.clearTimeout(sendTimer);
+      sendTimer = null;
+      if (socket.connected) {
+        setStatus('connected', '正在输入中文…');
+      }
+    });
+
+    editor.addEventListener('compositionend', () => {
+      isComposing = false;
       scheduleLineLayout();
       updateActiveLine();
       scheduleRender();
-      scheduleSend();
+      flushDeferredRealtimeEvents();
+      if (editor.value !== serverContent) scheduleSend();
+      maybeSave();
+    });
+
+    editor.addEventListener('input', (event) => {
+      scheduleLineLayout();
+      updateActiveLine();
+      scheduleRender();
+      if (!isComposing && !event.isComposing) scheduleSend();
     });
 
     editor.addEventListener('scroll', () => {

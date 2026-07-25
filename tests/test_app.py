@@ -157,6 +157,10 @@ class MarkdownEditorTests(unittest.TestCase):
             main.get_document_state(self.document_id).snapshot(),
             ("XabcY", 2),
         )
+        self.assertEqual(
+            main.get_document_record(self.document_id)["content"],
+            "XabcY",
+        )
 
         first.disconnect()
         second.disconnect()
@@ -188,17 +192,18 @@ class MarkdownEditorTests(unittest.TestCase):
         first.disconnect()
         second.disconnect()
 
-    def test_save_endpoint_cannot_overwrite_with_stale_content(self):
+    def test_editor_has_offline_lock_and_no_manual_save_controls(self):
         client = main.app.test_client()
         self.login(client)
-        response = client.post(
-            f"/documents/{self.document_id}/save",
-            json={"content": "stale page"},
-        )
+        response = client.get(f"/documents/{self.document_id}")
         self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("断网状态禁止编辑", page)
+        self.assertNotIn('id="saveBtn"', page)
+        self.assertNotIn('id="toggleEdit"', page)
         self.assertEqual(
-            main.get_document_state(self.document_id).snapshot(),
-            ("", 0),
+            client.post(f"/documents/{self.document_id}/save").status_code,
+            404,
         )
 
     def test_deletion_preserves_a_concurrent_insertion_inside_it(self):

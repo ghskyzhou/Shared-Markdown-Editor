@@ -318,12 +318,6 @@ class CollaborativeDocument:
                 "operation": single_splice(before_merge, self.content),
             }
 
-    def persist(self) -> tuple[str, int]:
-        with self._lock:
-            save_document_content(self.document_id, self.content)
-            return self.content, self.version
-
-
 document_states: dict[int, CollaborativeDocument] = {}
 document_states_lock = threading.RLock()
 
@@ -431,15 +425,6 @@ def update_document_title(document_id: int):
     return jsonify({"status": "ok", "title": title})
 
 
-@app.route("/documents/<int:document_id>/save", methods=["POST"])
-def save_document(document_id: int):
-    try:
-        _, version = get_document_state(document_id).persist()
-    except LookupError:
-        abort(404)
-    return jsonify({"status": "ok", "version": version})
-
-
 @app.route("/documents/<int:document_id>/delete", methods=["POST"])
 def delete_document(document_id: int):
     if not delete_document_record(document_id):
@@ -520,20 +505,6 @@ def document_update(data):
         },
         room=document_room(document_id),
     )
-    return None
-
-
-@socketio.on("document:save")
-def socket_document_save(data):
-    if not session.get("authenticated"):
-        return False
-    try:
-        document_id = int((data or {}).get("document_id", -1))
-        _, version = get_document_state(document_id).persist()
-    except (TypeError, ValueError, LookupError):
-        emit("document:error", {"message": "文档不存在"})
-        return None
-    emit("document:saved", {"document_id": document_id, "version": version})
     return None
 
 

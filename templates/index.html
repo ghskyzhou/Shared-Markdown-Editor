@@ -90,6 +90,11 @@
       background: #fff;
     }
 
+    #documentTitle:disabled {
+      color: #6b7280;
+      cursor: not-allowed;
+    }
+
     .workspace {
       display: flex;
       flex: 1;
@@ -316,20 +321,6 @@
     .connection-status.connected .status-dot { background: #22c55e; }
     .connection-status.error .status-dot { background: #ef4444; }
 
-    button {
-      padding: 7px 13px;
-      color: #27272a;
-      background: var(--soft);
-      border: 1px solid #d8dadd;
-      border-radius: 7px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-
-    button:hover { background: #efeff0; }
-    button:active { transform: translateY(1px); }
-    button:disabled { opacity: 0.55; cursor: wait; }
-
     .exit-link {
       padding: 7px 13px;
       color: #27272a;
@@ -366,7 +357,7 @@
 <body>
   <header class="document-header">
     <a class="home-link" href="{{ url_for('index') }}">Markdown 文档</a>
-    <input id="documentTitle" type="text" maxlength="160"
+    <input id="documentTitle" type="text" maxlength="160" disabled
            value="{{ document_title }}" aria-label="文档标题">
   </header>
 
@@ -377,7 +368,7 @@
       </div>
       <div class="editor-stage">
         <div id="currentLine" aria-hidden="true"></div>
-        <textarea id="editor" wrap="soft" spellcheck="false"
+        <textarea id="editor" wrap="soft" spellcheck="false" disabled
                   aria-label="Markdown 文本"
                   placeholder="输入 Markdown 内容…"></textarea>
         <div id="lineMeasure" aria-hidden="true"></div>
@@ -389,10 +380,8 @@
   <footer class="toolbar">
     <div id="connectionStatus" class="connection-status">
       <span class="status-dot" aria-hidden="true"></span>
-      <span id="statusText">正在连接实时协作…</span>
+      <span id="statusText">正在连接服务器…</span>
     </div>
-    <button id="toggleEdit" type="button">关闭编辑</button>
-    <button id="saveBtn" type="button">保存</button>
     <a class="exit-link" href="{{ url_for('index') }}">退出</a>
   </footer>
 
@@ -410,16 +399,13 @@
     const documentTitle = document.getElementById('documentTitle');
     const connectionStatus = document.getElementById('connectionStatus');
     const statusText = document.getElementById('statusText');
-    const saveBtn = document.getElementById('saveBtn');
-    const toggleEdit = document.getElementById('toggleEdit');
 
     let serverContent = initialContent;
     let serverVersion = initialVersion;
     let inflight = null;
     let sendTimer = null;
     let renderTimer = null;
-    let saveRequested = false;
-    let initializedFromSocket = false;
+    let connectionReady = false;
     let activeLineIndex = -1;
     let scrollLock = null;
     let scrollLockTimer = null;
@@ -435,6 +421,25 @@
       connectionStatus.classList.toggle('connected', kind === 'connected');
       connectionStatus.classList.toggle('error', kind === 'error');
       statusText.textContent = message;
+    }
+
+    function setEditingAvailable(available) {
+      connectionReady = available;
+      editor.disabled = !available;
+      documentTitle.disabled = !available;
+      if (!available) editor.blur();
+    }
+
+    function enterOfflineMode() {
+      window.clearTimeout(sendTimer);
+      window.clearTimeout(titleSaveTimer);
+      sendTimer = null;
+      titleSaveTimer = null;
+      inflight = null;
+      isComposing = false;
+      deferredRealtimeEvents = [];
+      setEditingAvailable(false);
+      setStatus('error', '断网状态禁止编辑');
     }
 
     function normalizeLang(language) {
@@ -817,11 +822,13 @@
 
     function sendPendingChanges() {
       sendTimer = null;
-      if (isComposing) return;
-      if (!socket.connected || inflight || editor.value === serverContent) {
-        maybeSave();
-        return;
-      }
+      if (
+        !connectionReady ||
+        isComposing ||
+        !socket.connected ||
+        inflight ||
+        editor.value === serverContent
+      ) return;
       inflight = {
         content: editor.value,
         baseContent: serverContent,
@@ -835,19 +842,10 @@
       });
     }
 
-    function maybeSave() {
-      if (
-        isComposing ||
-        !saveRequested ||
-        inflight ||
-        editor.value !== serverContent
-      ) return;
-      saveRequested = false;
-      socket.emit('document:save', { document_id: documentId });
-    }
-
     function saveTitle() {
       window.clearTimeout(titleSaveTimer);
+      titleSaveTimer = null;
+      if (!connectionReady) return;
       const requestedTitle = documentTitle.value;
       fetch(`/documents/${documentId}/title`, {
         method: 'POST',
@@ -862,25 +860,23 @@
           documentTitle.value = result.title;
           document.title = `${result.title} · Markdown 编辑器`;
         })
-        .catch(() => setStatus('error', '标题暂时无法保存'));
+        .catch(() => {
+          setStatus(
+            'error',
+            connectionReady ? '标题暂时无法保存' : '断网状态禁止编辑'
+          );
+        });
     }
 
     function handleDocumentInit(state) {
       if (state.document_id !== documentId) return;
-      const localValue = editor.value;
-      if (!initializedFromSocket && localValue === initialContent) {
-        replaceEditorValue(state.content);
-      } else if (localValue !== serverContent) {
-        replaceEditorValue(mergeLocalChanges(serverContent, localValue, state.content));
-      } else {
-        replaceEditorValue(state.content);
-      }
+      replaceEditorValue(state.content);
       serverContent = state.content;
       serverVersion = state.version;
       inflight = null;
-      initializedFromSocket = true;
-      setStatus('connected', '实时协作已连接');
-      if (editor.value !== serverContent) scheduleSend();
+      deferredRealtimeEvents = [];
+      setEditingAvailable(true);
+      setStatus('connected', '所有更改已同步');
     }
 
     function handleDocumentState(state) {
@@ -913,7 +909,6 @@
       );
 
       if (editor.value !== serverContent) scheduleSend();
-      maybeSave();
     }
 
     function handleDocumentError(state) {
@@ -939,6 +934,12 @@
     }
 
     function receiveRealtimeEvent(type, state) {
+      if (!connectionReady && type !== 'init') {
+        if (type === 'error') {
+          setStatus('error', state.message || '无法读取服务器版本');
+        }
+        return;
+      }
       if (isComposing) {
         deferredRealtimeEvents.push({ type, state });
         return;
@@ -960,16 +961,25 @@
     });
 
     socket.on('connect', () => {
-      setStatus('connected', '正在进入实时协作…');
+      setEditingAvailable(false);
+      setStatus('pending', '正在同步服务器最新版本…');
       socket.emit('document:join', { document_id: documentId });
     });
 
     socket.on('disconnect', () => {
-      setStatus('error', '连接已断开，正在重连…');
+      enterOfflineMode();
     });
 
     socket.on('connect_error', () => {
-      setStatus('error', '实时连接失败，正在重试…');
+      enterOfflineMode();
+    });
+
+    window.addEventListener('offline', enterOfflineMode);
+    window.addEventListener('online', () => {
+      if (!socket.connected) return;
+      setEditingAvailable(false);
+      setStatus('pending', '正在同步服务器最新版本…');
+      socket.emit('document:join', { document_id: documentId });
     });
 
     socket.on('document:init', (state) => {
@@ -982,12 +992,6 @@
 
     socket.on('document:error', (state) => {
       receiveRealtimeEvent('error', state);
-    });
-
-    socket.on('document:saved', (state) => {
-      if (state.document_id !== documentId) return;
-      saveBtn.disabled = false;
-      setStatus('connected', '已保存');
     });
 
     socket.on('document:deleted', (state) => {
@@ -1013,7 +1017,6 @@
       scheduleRender();
       flushDeferredRealtimeEvents();
       if (editor.value !== serverContent) scheduleSend();
-      maybeSave();
     });
 
     editor.addEventListener('input', (event) => {
@@ -1038,23 +1041,6 @@
       titleSaveTimer = window.setTimeout(saveTitle, 500);
     });
     documentTitle.addEventListener('change', saveTitle);
-
-    toggleEdit.addEventListener('click', () => {
-      editor.disabled = !editor.disabled;
-      toggleEdit.textContent = editor.disabled ? '开启编辑' : '关闭编辑';
-      if (!editor.disabled) editor.focus();
-    });
-
-    saveBtn.addEventListener('click', () => {
-      if (!socket.connected) {
-        setStatus('error', '尚未连接，暂时无法保存');
-        return;
-      }
-      saveBtn.disabled = true;
-      saveRequested = true;
-      sendPendingChanges();
-      maybeSave();
-    });
 
     window.addEventListener('beforeunload', (event) => {
       if (editor.value !== serverContent || inflight) {

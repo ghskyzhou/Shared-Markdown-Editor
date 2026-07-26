@@ -420,6 +420,21 @@
     .connection-status.connected .status-dot { background: #22c55e; }
     .connection-status.error .status-dot { background: #ef4444; }
 
+    .status-message {
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .presence-divider {
+      color: var(--border);
+      user-select: none;
+    }
+
+    .presence-count {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+
     .theme-toggle {
       display: inline-grid;
       width: 36px;
@@ -557,7 +572,7 @@
       }
 
       .gutter { flex-basis: 48px; }
-      .connection-status span:last-child {
+      .status-message {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -597,7 +612,9 @@
   <footer class="toolbar">
     <div id="connectionStatus" class="connection-status">
       <span class="status-dot" aria-hidden="true"></span>
-      <span id="statusText">正在连接服务器…</span>
+      <span id="statusText" class="status-message">正在连接服务器…</span>
+      <span class="presence-divider" aria-hidden="true">·</span>
+      <span id="presenceText" class="presence-count">现在有 0 人在线</span>
     </div>
     <button id="mobileViewToggle" class="mobile-view-toggle" type="button"
             aria-label="切换到预览">预览</button>
@@ -620,6 +637,7 @@
     const documentTitle = document.getElementById('documentTitle');
     const connectionStatus = document.getElementById('connectionStatus');
     const statusText = document.getElementById('statusText');
+    const presenceText = document.getElementById('presenceText');
     const themeToggle = document.getElementById('themeToggle');
     const themeIcon = document.getElementById('themeIcon');
     const mobileViewToggle = document.getElementById('mobileViewToggle');
@@ -803,6 +821,11 @@
       statusText.textContent = message;
     }
 
+    function setPresenceCount(count) {
+      const safeCount = Math.max(0, Number.parseInt(count, 10) || 0);
+      presenceText.textContent = `现在有 ${safeCount} 人在线`;
+    }
+
     function setEditingAvailable(available) {
       connectionReady = available;
       editor.disabled = !available;
@@ -822,6 +845,7 @@
       deferredRealtimeEvents = [];
       remoteCursors.clear();
       remoteCursorLayer.replaceChildren();
+      setPresenceCount(0);
       setEditingAvailable(false);
       setStatus('error', '断网状态禁止编辑');
     }
@@ -1391,6 +1415,11 @@
 
     socket.on('document:error', (state) => {
       receiveRealtimeEvent('error', state);
+    });
+
+    socket.on('document:presence', (state) => {
+      if (state.document_id !== documentId) return;
+      setPresenceCount(state.count);
     });
 
     socket.on('document:cursor', (state) => {

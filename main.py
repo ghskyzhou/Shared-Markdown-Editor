@@ -322,6 +322,7 @@ document_states: dict[int, CollaborativeDocument] = {}
 document_states_lock = threading.RLock()
 cursor_states: dict[int, dict[str, dict[str, Any]]] = {}
 socket_documents: dict[str, set[int]] = {}
+document_viewers: dict[int, set[str]] = {}
 cursor_states_lock = threading.RLock()
 
 
@@ -437,6 +438,7 @@ def delete_document(document_id: int):
         document_states.pop(document_id, None)
     with cursor_states_lock:
         cursor_states.pop(document_id, None)
+        document_viewers.pop(document_id, None)
 
     socketio.emit(
         "document:deleted",
@@ -468,11 +470,19 @@ def document_join(data):
     content, version = state.snapshot()
     with cursor_states_lock:
         socket_documents.setdefault(request.sid, set()).add(document_id)
+        viewers = document_viewers.setdefault(document_id, set())
+        viewers.add(request.sid)
+        viewer_count = len(viewers)
         active_cursors = [
             cursor.copy()
             for client_id, cursor in cursor_states.get(document_id, {}).items()
             if client_id != request.sid
         ]
+    socketio.emit(
+        "document:presence",
+        {"document_id": document_id, "count": viewer_count},
+        room=document_room(document_id),
+    )
     emit(
         "document:init",
         {
@@ -590,13 +600,25 @@ def socket_disconnect():
     client_id = request.sid
     with cursor_states_lock:
         document_ids = socket_documents.pop(client_id, set())
+        presence_updates = []
         for document_id in document_ids:
             cursor_states.get(document_id, {}).pop(client_id, None)
+            viewers = document_viewers.get(document_id, set())
+            viewers.discard(client_id)
+            viewer_count = len(viewers)
+            if not viewers:
+                document_viewers.pop(document_id, None)
+            presence_updates.append((document_id, viewer_count))
 
-    for document_id in document_ids:
+    for document_id, viewer_count in presence_updates:
         socketio.emit(
             "document:cursor:remove",
             {"document_id": document_id, "client_id": client_id},
+            room=document_room(document_id),
+        )
+        socketio.emit(
+            "document:presence",
+            {"document_id": document_id, "count": viewer_count},
             room=document_room(document_id),
         )
 

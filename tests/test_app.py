@@ -18,6 +18,7 @@ class MarkdownEditorTests(unittest.TestCase):
         main.document_states.clear()
         main.cursor_states.clear()
         main.socket_documents.clear()
+        main.document_viewers.clear()
         main.initialize_database(migrate_legacy=False)
         self.document_id = main.create_document("测试文档")
 
@@ -25,6 +26,7 @@ class MarkdownEditorTests(unittest.TestCase):
         main.document_states.clear()
         main.cursor_states.clear()
         main.socket_documents.clear()
+        main.document_viewers.clear()
         self.temporary_directory.cleanup()
 
     def login(self, client):
@@ -209,6 +211,30 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertEqual(removal_events[-1]["args"][0]["client_id"], cursor["client_id"])
         second.disconnect()
 
+    def test_document_presence_count_tracks_connected_viewers(self):
+        first_http = main.app.test_client()
+        second_http = main.app.test_client()
+        self.login(first_http)
+        self.login(second_http)
+        first = self.joined_socket(first_http)
+        second = self.joined_socket(second_http)
+
+        joined_events = [
+            event
+            for event in first.get_received()
+            if event["name"] == "document:presence"
+        ]
+        self.assertEqual(joined_events[-1]["args"][0]["count"], 2)
+
+        first.disconnect()
+        left_events = [
+            event
+            for event in second.get_received()
+            if event["name"] == "document:presence"
+        ]
+        self.assertEqual(left_events[-1]["args"][0]["count"], 1)
+        second.disconnect()
+
     def test_documents_use_separate_socket_rooms(self):
         other_document_id = main.create_document("另一篇")
         first_http = main.app.test_client()
@@ -245,6 +271,7 @@ class MarkdownEditorTests(unittest.TestCase):
         self.assertIn("断网状态禁止编辑", page)
         self.assertIn('id="themeToggle"', page)
         self.assertIn('id="mobileViewToggle"', page)
+        self.assertIn("现在有 0 人在线", page)
         self.assertNotIn("协作者", page)
         self.assertNotIn('id="saveBtn"', page)
         self.assertNotIn('id="toggleEdit"', page)
